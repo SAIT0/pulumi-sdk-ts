@@ -590,6 +590,11 @@ function normalizeTypeSchema(
 	schema: PulumiTypeSchema,
 ): [PulumiNormalizedTypeSchema, Record<string, PulumiNormalizedObjectSchema>] {
 	if ("$ref" in schema) {
+		// $ref のみ（type なし）の場合はそのまま参照を返す
+		if (!schema.type) {
+			return [{ $ref: `#/types/${schema.$ref}` }, {}];
+		}
+		// $ref + type がある場合は従来通り正規化
 		const [internalSchema, typeMap] = normalizeObjectSchema(schema.type);
 		return [
 			{ $ref: `#/types/${schema.$ref}` },
