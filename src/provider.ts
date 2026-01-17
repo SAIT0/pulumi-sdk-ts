@@ -10,7 +10,7 @@ export type Provider<TEnv> = {
 	provider: {
 		description: string;
 	};
-	resources: Array<Resource<any, any, TEnv>>;
+	resources: Array<Resource<any, any, TEnv, any>>;
 
 	configure: () => <A, E, R>(
 		self: Effect.Effect<A, E, R>,

@@ -548,7 +548,7 @@ function normalizeResourceSchema<
 	TInputsSchema extends PulumiInputsSchema,
 	TPropertiesSchema extends PulumiObjectSchema,
 >(
-	resource: Resource<TInputsSchema, TPropertiesSchema, any>,
+	resource: Resource<TInputsSchema, TPropertiesSchema, any, any>,
 ): [
 	string,
 	PulumiResourceSchema,

@@ -85,7 +85,7 @@ function tryWith<T>(fn: () => T): Effect.Effect<T, PulumiError> {
 function findResource<TEnv>(
 	provider: Provider<TEnv>,
 	call: grpc.ServerUnaryCall<any, any>,
-): Effect.Effect<Resource<any, any, TEnv>, PulumiError> {
+): Effect.Effect<Resource<any, any, TEnv, any>, PulumiError> {
 	return tryWith(() => call.request.getType()).pipe(
 		Effect.flatMap((resourceType) => {
 			const resource = provider.resources.find(
