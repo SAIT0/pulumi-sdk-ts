@@ -5,7 +5,10 @@ import type {
 	InferPulumiObjectSchema,
 	PulumiInputsSchema,
 	PulumiObjectSchema,
+	PulumiSchemaDict,
 } from "./schema.ts";
+
+type EmptyDict = Record<string, never>;
 
 export interface CheckResult<Inputs> {
 	readonly inputs: Inputs;
@@ -48,53 +51,55 @@ export type Resource<
 	TInputsSchema extends PulumiInputsSchema,
 	TPropertiesSchema extends PulumiObjectSchema,
 	TEnv,
+	TDict extends PulumiSchemaDict = EmptyDict,
 > = {
 	name: string;
 	description: string;
 	inputsSchema: TInputsSchema;
 	propertiesSchema: TPropertiesSchema;
+	schemaDict?: TDict;
 
 	check: (
-		olds: InferPulumiInputsSchema<TInputsSchema> | undefined,
-		news: InferPulumiInputsSchema<TInputsSchema>,
+		olds: InferPulumiInputsSchema<TInputsSchema, TDict> | undefined,
+		news: InferPulumiInputsSchema<TInputsSchema, TDict>,
 	) => Effect.Effect<
-		CheckResult<InferPulumiInputsSchema<TInputsSchema>>,
+		CheckResult<InferPulumiInputsSchema<TInputsSchema, TDict>>,
 		CheckError
 	>;
 	diff: (
 		id: string,
-		olds: InferPulumiObjectSchema<TPropertiesSchema>,
-		news: InferPulumiInputsSchema<TInputsSchema>,
+		olds: InferPulumiObjectSchema<TPropertiesSchema, TDict>,
+		news: InferPulumiInputsSchema<TInputsSchema, TDict>,
 	) => DiffResult;
 	create: (
-		config: InferPulumiInputsSchema<TInputsSchema>,
+		config: InferPulumiInputsSchema<TInputsSchema, TDict>,
 		isPreview: boolean,
 	) => Effect.Effect<
-		CreateResult<InferPulumiObjectSchema<TPropertiesSchema>>,
+		CreateResult<InferPulumiObjectSchema<TPropertiesSchema, TDict>>,
 		PulumiError,
 		TEnv
 	>;
 	read: (
 		id: string,
-		props: InferPulumiObjectSchema<TPropertiesSchema> | undefined,
+		props: InferPulumiObjectSchema<TPropertiesSchema, TDict> | undefined,
 	) => Effect.Effect<
-		ReadResult<InferPulumiObjectSchema<TPropertiesSchema>>,
+		ReadResult<InferPulumiObjectSchema<TPropertiesSchema, TDict>>,
 		PulumiError,
 		TEnv
 	>;
 	update: (
 		id: string,
-		props: InferPulumiObjectSchema<TPropertiesSchema>,
-		config: InferPulumiInputsSchema<TInputsSchema>,
+		props: InferPulumiObjectSchema<TPropertiesSchema, TDict>,
+		config: InferPulumiInputsSchema<TInputsSchema, TDict>,
 		isPreview: boolean,
 	) => Effect.Effect<
-		UpdateResult<InferPulumiObjectSchema<TPropertiesSchema>>,
+		UpdateResult<InferPulumiObjectSchema<TPropertiesSchema, TDict>>,
 		PulumiError,
 		TEnv
 	>;
 	delete: (
 		id: string,
-		props: InferPulumiObjectSchema<TPropertiesSchema>,
+		props: InferPulumiObjectSchema<TPropertiesSchema, TDict>,
 	) => Effect.Effect<void, PulumiError, TEnv>;
 };
 
@@ -102,8 +107,9 @@ export function resource<
 	TInputsSchema extends PulumiInputsSchema,
 	TPropertiesSchema extends PulumiObjectSchema,
 	TEnv,
+	TDict extends PulumiSchemaDict = EmptyDict,
 >(
-	r: Resource<TInputsSchema, TPropertiesSchema, TEnv>,
-): Resource<TInputsSchema, TPropertiesSchema, TEnv> {
+	r: Resource<TInputsSchema, TPropertiesSchema, TEnv, TDict>,
+): Resource<TInputsSchema, TPropertiesSchema, TEnv, TDict> {
 	return r;
 }

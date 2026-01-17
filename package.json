@@ -1,6 +1,6 @@
 {
 	"name": "@sait0/pulumi-sdk-ts",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"description": "unoffical pulumi typescript sdk",
 	"type": "commonjs",
 	"exports": {
@@ -30,6 +30,6 @@
 		"effect": "^3.19.13"
 	},
 	"publishConfig": {
-    	"registry": "https://npm.pkg.github.com"
-  	}
+		"registry": "https://npm.pkg.github.com"
+	}
 }

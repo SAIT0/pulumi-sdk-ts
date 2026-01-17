@@ -38,6 +38,7 @@ export type PulumiObjectSchema = {
 	properties: Record<string, PulumiTypeSchema>;
 	required: readonly string[];
 	description?: string;
+	additionalProperties?: PulumiTypeSchema;
 };
 
 export type PulumiInlineObjectSchema = {
@@ -45,6 +46,7 @@ export type PulumiInlineObjectSchema = {
 	properties: Record<string, PulumiTypeSchema>;
 	required: readonly string[];
 	description?: string;
+	additionalProperties?: PulumiTypeSchema;
 };
 
 export type PulumiTypeSchemaNoOneOf =
@@ -81,6 +83,7 @@ export type PulumiNormalizedObjectSchema = {
 	properties: Record<string, PulumiNormalizedTypeSchema>;
 	required: readonly string[];
 	description?: string;
+	additionalProperties?: PulumiNormalizedTypeSchema;
 };
 
 export type PulumiNormalizedTypeSchemaNoOneOf =
@@ -166,6 +169,14 @@ export type InferPulumiSchema<
 	? InferPulumiSchemaNoOneOf<S["oneOf"][number], Dict>
 	: InferPulumiSchemaNoOneOf<S, Dict>;
 
+// additionalProperties の型を抽出するヘルパー
+type AdditionalPropertiesType<O, Dict extends PulumiSchemaDict> =
+	O extends { additionalProperties: infer AP }
+		? AP extends PulumiTypeSchema
+			? Record<string, InferPulumiSchema<AP, Dict>>
+			: {}
+		: {};
+
 // PulumiObjectSchema -> required/optional を反映した TS 型へ
 export type InferPulumiObjectSchema<
 	O extends { properties: Record<string, any>; required: readonly string[] },
@@ -178,7 +189,7 @@ export type InferPulumiObjectSchema<
 			keyof O["properties"],
 			RequiredKeysOf<O>
 		>]?: InferPulumiSchema<O["properties"][K], Dict>;
-	}
+	} & AdditionalPropertiesType<O, Dict>
 >;
 
 export type InferPulumiInputsSchema<
@@ -192,7 +203,7 @@ export type InferPulumiInputsSchema<
 			keyof S["properties"],
 			RequiredKeysOf<S>
 		>]?: InferPulumiSchema<S["properties"][K], Dict>;
-	}
+	} & AdditionalPropertiesType<S, Dict>
 >;
 
 export class ParseError extends Data.TaggedError("ParseError")<{
@@ -506,16 +517,27 @@ function parsePulumiObjectSchema<
 			out[key] = yield* parse(value[key], propSchema, dict, pushPath(path, key));
 		}
 
-		// unknown keysをはじく
+		// unknown keys の処理
 		for (const key of Object.keys(value)) {
 			if (key in schema.properties) continue;
 
-			return yield* Effect.fail(
-				new ParseError({
-					message: `Unknown property "${key}" for schema ref(${path.join(".")})`,
-					path: pushPath(path, key),
-				}),
-			);
+			if (schema.additionalProperties) {
+				// additionalProperties がある場合は、そのスキーマでパース
+				out[key] = yield* parse(
+					value[key],
+					schema.additionalProperties,
+					dict,
+					pushPath(path, key),
+				);
+			} else {
+				// 従来通りエラー
+				return yield* Effect.fail(
+					new ParseError({
+						message: `Unknown property "${key}" for schema ref(${path.join(".")})`,
+						path: pushPath(path, key),
+					}),
+				);
+			}
 		}
 
 		return out as InferPulumiObjectSchema<S, Dict>;
@@ -618,6 +640,7 @@ function normalizeTypeSchema(
 					properties: normalized.properties,
 					required: normalized.required,
 					description: normalized.description,
+					additionalProperties: normalized.additionalProperties,
 				},
 				typeMap,
 			];
@@ -651,14 +674,26 @@ function normalizeObjectSchema(
 		[{}, {}],
 	);
 
+	// additionalProperties を正規化
+	let additionalProperties: PulumiNormalizedTypeSchema | undefined;
+	let additionalTypeMap: Record<string, PulumiNormalizedObjectSchema> = {};
+	if (schema.additionalProperties) {
+		const [normalizedAdditional, map] = normalizeTypeSchema(
+			schema.additionalProperties,
+		);
+		additionalProperties = normalizedAdditional;
+		additionalTypeMap = map;
+	}
+
 	return [
 		{
 			type: "object",
 			properties: normalized,
 			required: schema.required,
 			description: schema.description,
+			additionalProperties,
 		},
-		typeMap,
+		{ ...typeMap, ...additionalTypeMap },
 	];
 }
 

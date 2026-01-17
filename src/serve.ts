@@ -121,14 +121,15 @@ function handleCheck<
 >(
 	call: grpc.ServerUnaryCall<any, any>,
 	callback: grpc.sendUnaryData<any>,
-	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv>,
+	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv, any>,
 ) {
+	const dict = resource.schemaDict ?? {};
 	return Effect.Do.pipe(
 		Effect.bind("olds", () =>
 			tryWith(() => structToObject(call.request.getOlds())).pipe(
 				Effect.flatMap((rawProps) =>
 					rawProps
-						? parse(rawProps, resource.inputsSchema)
+						? parse(rawProps, resource.inputsSchema, dict)
 						: Effect.succeed(undefined),
 				),
 				Effect.catchTag("ParseError", (e) =>
@@ -143,7 +144,9 @@ function handleCheck<
 		),
 		Effect.bind("news", () =>
 			tryWith(() => structToObject(call.request.getNews())).pipe(
-				Effect.flatMap((rawProps) => parse(rawProps, resource.inputsSchema)),
+				Effect.flatMap((rawProps) =>
+					parse(rawProps, resource.inputsSchema, dict),
+				),
 				Effect.catchTag("ParseError", (e) =>
 					Effect.fail(
 						new PulumiError({
@@ -156,7 +159,9 @@ function handleCheck<
 		),
 		Effect.bind("result", ({ olds, news }) =>
 			resource.check(olds, news).pipe(
-				Effect.flatMap((result) => parse(result.inputs, resource.inputsSchema)),
+				Effect.flatMap((result) =>
+					parse(result.inputs, resource.inputsSchema, dict),
+				),
 				Effect.map((inputs) => ({
 					inputs,
 				})),
@@ -199,14 +204,15 @@ function handleDiff<
 >(
 	call: grpc.ServerUnaryCall<any, any>,
 	callback: grpc.sendUnaryData<any>,
-	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv>,
+	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv, any>,
 ) {
+	const dict = resource.schemaDict ?? {};
 	return Effect.Do.pipe(
 		Effect.bind("id", () => tryWith<string>(() => call.request.getId())),
 		Effect.bind("olds", () =>
 			tryWith(() => structToObject(call.request.getOlds())).pipe(
 				Effect.flatMap((rawProps) =>
-					parse(rawProps, resource.propertiesSchema),
+					parse(rawProps, resource.propertiesSchema, dict),
 				),
 				Effect.catchTag("ParseError", (e) =>
 					Effect.fail(
@@ -220,7 +226,9 @@ function handleDiff<
 		),
 		Effect.bind("news", () =>
 			tryWith(() => structToObject(call.request.getNews())).pipe(
-				Effect.flatMap((rawProps) => parse(rawProps, resource.inputsSchema)),
+				Effect.flatMap((rawProps) =>
+					parse(rawProps, resource.inputsSchema, dict),
+				),
 				Effect.catchTag("ParseError", (e) =>
 					Effect.fail(
 						new PulumiError({
@@ -280,12 +288,15 @@ function handleCreate<
 >(
 	call: grpc.ServerUnaryCall<any, any>,
 	callback: grpc.sendUnaryData<any>,
-	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv>,
+	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv, any>,
 ) {
+	const dict = resource.schemaDict ?? {};
 	return Effect.Do.pipe(
 		Effect.bind("props", () =>
 			tryWith(() => structToObject(call.request.getProperties())).pipe(
-				Effect.flatMap((rawProps) => parse(rawProps, resource.inputsSchema)),
+				Effect.flatMap((rawProps) =>
+					parse(rawProps, resource.inputsSchema, dict),
+				),
 				Effect.catchTag("ParseError", (e) =>
 					Effect.fail(
 						new PulumiError({
@@ -302,7 +313,7 @@ function handleCreate<
 		Effect.bind("result", ({ props, isPreview }) =>
 			resource.create(props, isPreview).pipe(
 				Effect.flatMap((result) =>
-					parse(result.outs, resource.propertiesSchema).pipe(
+					parse(result.outs, resource.propertiesSchema, dict).pipe(
 						Effect.map((props) => ({ id: result.id, props })),
 					),
 				),
@@ -334,15 +345,16 @@ function handleRead<
 >(
 	call: grpc.ServerUnaryCall<any, any>,
 	callback: grpc.sendUnaryData<any>,
-	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv>,
+	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv, any>,
 ) {
+	const dict = resource.schemaDict ?? {};
 	return Effect.Do.pipe(
 		Effect.bind("id", () => tryWith<string>(() => call.request.getId())),
 		Effect.bind("props", () =>
 			tryWith(() => structToObject(call.request.getProperties())).pipe(
 				Effect.flatMap((rawProps) =>
 					rawProps
-						? parse(rawProps, resource.propertiesSchema)
+						? parse(rawProps, resource.propertiesSchema, dict)
 						: Effect.succeed(undefined),
 				),
 				Effect.catchTag("ParseError", (e) =>
@@ -358,7 +370,7 @@ function handleRead<
 		Effect.bind("result", ({ id, props }) =>
 			resource.read(id, props).pipe(
 				Effect.flatMap(({ id, props }) =>
-					parse(props, resource.propertiesSchema).pipe(
+					parse(props, resource.propertiesSchema, dict).pipe(
 						Effect.map((props) => ({ id, props })),
 					),
 				),
@@ -391,14 +403,15 @@ function handleUpdate<
 >(
 	call: grpc.ServerUnaryCall<any, any>,
 	callback: grpc.sendUnaryData<any>,
-	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv>,
+	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv, any>,
 ) {
+	const dict = resource.schemaDict ?? {};
 	return Effect.Do.pipe(
 		Effect.bind("id", () => tryWith<string>(() => call.request.getId())),
 		Effect.bind("olds", () =>
 			tryWith(() => structToObject(call.request.getOlds())).pipe(
 				Effect.flatMap((rawProps) =>
-					parse(rawProps, resource.propertiesSchema),
+					parse(rawProps, resource.propertiesSchema, dict),
 				),
 				Effect.catchTag("ParseError", (e) =>
 					Effect.fail(
@@ -412,7 +425,9 @@ function handleUpdate<
 		),
 		Effect.bind("news", () =>
 			tryWith(() => structToObject(call.request.getNews())).pipe(
-				Effect.flatMap((rawProps) => parse(rawProps, resource.inputsSchema)),
+				Effect.flatMap((rawProps) =>
+					parse(rawProps, resource.inputsSchema, dict),
+				),
 				Effect.catchTag("ParseError", (e) =>
 					Effect.fail(
 						new PulumiError({
@@ -429,7 +444,7 @@ function handleUpdate<
 		Effect.bind("result", ({ id, olds, news, isPreview }) =>
 			resource.update(id, olds, news, isPreview).pipe(
 				Effect.flatMap(({ outs }) =>
-					parse(outs, resource.propertiesSchema).pipe(
+					parse(outs, resource.propertiesSchema, dict).pipe(
 						Effect.map((outs) => ({ id, outs })),
 					),
 				),
@@ -460,14 +475,15 @@ function handleDelete<
 >(
 	call: grpc.ServerUnaryCall<any, any>,
 	callback: grpc.sendUnaryData<any>,
-	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv>,
+	resource: Resource<TInputsSchema, TPropertiesSchema, TEnv, any>,
 ) {
+	const dict = resource.schemaDict ?? {};
 	return Effect.Do.pipe(
 		Effect.bind("id", () => tryWith<string>(() => call.request.getId())),
 		Effect.bind("olds", () =>
 			tryWith(() => structToObject(call.request.getProperties())).pipe(
 				Effect.flatMap((rawProps) =>
-					parse(rawProps, resource.propertiesSchema),
+					parse(rawProps, resource.propertiesSchema, dict),
 				),
 				Effect.catchTag("ParseError", (e) =>
 					Effect.fail(

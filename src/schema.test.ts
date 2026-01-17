@@ -523,3 +523,224 @@ describe("後方互換性のテスト", () => {
 		}),
 	);
 });
+
+describe("additionalPropertiesのテスト", () => {
+	it.effect("純粋なRecord<string, string>をパース出来る", () =>
+		Effect.gen(function* () {
+			const schema: PulumiObjectSchema = {
+				properties: {},
+				required: [],
+				additionalProperties: { type: "string" },
+			};
+			const result = yield* parse(
+				{ key1: "value1", key2: "value2" },
+				{ $ref: "", type: schema },
+			);
+			expect(result).toStrictEqual({ key1: "value1", key2: "value2" });
+		}),
+	);
+
+	it.effect("propertiesとadditionalPropertiesの組み合わせをパース出来る", () =>
+		Effect.gen(function* () {
+			const schema: PulumiObjectSchema = {
+				properties: {
+					id: { type: "string" },
+				},
+				required: ["id"],
+				additionalProperties: { type: "string" },
+			};
+			const result = yield* parse(
+				{ id: "123", extra1: "a", extra2: "b" },
+				{ $ref: "", type: schema },
+			);
+			expect(result).toStrictEqual({ id: "123", extra1: "a", extra2: "b" });
+		}),
+	);
+
+	it.effect("additionalPropertiesの型エラーを検出する", () =>
+		Effect.gen(function* () {
+			const schema: PulumiObjectSchema = {
+				properties: {},
+				required: [],
+				additionalProperties: { type: "string" },
+			};
+			const error = yield* expectParseError(
+				{ key1: "valid", key2: 123 },
+				{ $ref: "", type: schema },
+			);
+			expect(error.message).toContain("Expected string");
+			expect(error.path).toStrictEqual(["key2"]);
+		}),
+	);
+
+	it.effect("ネストしたadditionalPropertiesをパース出来る", () =>
+		Effect.gen(function* () {
+			const innerSchema: PulumiObjectSchema = {
+				properties: {},
+				required: [],
+				additionalProperties: { type: "number" },
+			};
+			const outerSchema: PulumiObjectSchema = {
+				properties: {},
+				required: [],
+				additionalProperties: {
+					$ref: "Inner",
+					type: innerSchema,
+				},
+			};
+			const result = yield* parse(
+				{
+					group1: { a: 1, b: 2 },
+					group2: { x: 10 },
+				},
+				{ $ref: "", type: outerSchema },
+			);
+			expect(result).toStrictEqual({
+				group1: { a: 1, b: 2 },
+				group2: { x: 10 },
+			});
+		}),
+	);
+
+	it("additionalPropertiesの型推論が正しく行われる(同一型)", () => {
+		const schema = {
+			properties: {
+				id: { type: "string" },
+			},
+			required: ["id"],
+			additionalProperties: { type: "string" },
+		} as const satisfies PulumiObjectSchema;
+
+		type Actual = InferPulumiSchema<{ $ref: ""; type: typeof schema }>;
+		// additionalPropertiesの値がRecord<string, string>に割り当て可能かを確認
+		const test: Actual = { id: "test", extra: "value" };
+		expect(test.id).toBe("test");
+		expect(test.extra).toBe("value");
+	});
+
+	it("純粋なRecord<string, T>の型推論が正しく行われる", () => {
+		const schema = {
+			properties: {},
+			required: [],
+			additionalProperties: { type: "boolean" },
+		} as const satisfies PulumiObjectSchema;
+
+		type Actual = InferPulumiSchema<{ $ref: ""; type: typeof schema }>;
+		type Expected = Record<string, boolean>;
+		const _assert: Assert<Equal<Actual, Expected>> = true;
+		expect(_assert).toStrictEqual(true);
+	});
+
+	it.effect("additionalPropertiesがundefinedの場合は従来通りエラー", () =>
+		Effect.gen(function* () {
+			const schema: PulumiObjectSchema = {
+				properties: {
+					id: { type: "string" },
+				},
+				required: ["id"],
+			};
+			const error = yield* expectParseError(
+				{ id: "123", unknown: "value" },
+				{ $ref: "", type: schema },
+			);
+			expect(error.message).toContain('Unknown property "unknown"');
+		}),
+	);
+});
+
+describe("additionalPropertiesと再帰的スキーマの組み合わせテスト", () => {
+	const jiraSchemaDict = {
+		ConditionGroupConfiguration: {
+			properties: {
+				operation: { type: "string", enum: ["ANY", "ALL"] },
+				conditions: { type: "array", items: { $ref: "WorkflowRuleConfiguration" } },
+				conditionGroups: {
+					type: "array",
+					items: { $ref: "ConditionGroupConfiguration" },
+				},
+			},
+			required: [],
+		},
+		WorkflowRuleConfiguration: {
+			properties: {
+				id: { type: "string" },
+				ruleKey: { type: "string" },
+				parameters: {
+					type: "object",
+					properties: {},
+					required: [],
+					additionalProperties: { type: "string" },
+				},
+			},
+			required: ["ruleKey"],
+		},
+	} as const satisfies PulumiSchemaDict;
+
+	it.effect("Jiraスタイルのスキーマをパース出来る", () =>
+		Effect.gen(function* () {
+			const result = yield* parse(
+				{
+					operation: "ALL",
+					conditions: [
+						{
+							ruleKey: "jira.condition.1",
+							parameters: { key1: "value1", key2: "value2" },
+						},
+					],
+					conditionGroups: [
+						{
+							operation: "ANY",
+							conditions: [{ ruleKey: "jira.condition.2", parameters: {} }],
+							conditionGroups: [],
+						},
+					],
+				},
+				{ $ref: "ConditionGroupConfiguration" },
+				jiraSchemaDict,
+			);
+			expect(result).toStrictEqual({
+				operation: "ALL",
+				conditions: [
+					{
+						ruleKey: "jira.condition.1",
+						parameters: { key1: "value1", key2: "value2" },
+					},
+				],
+				conditionGroups: [
+					{
+						operation: "ANY",
+						conditions: [{ ruleKey: "jira.condition.2", parameters: {} }],
+						conditionGroups: [],
+					},
+				],
+			});
+		}),
+	);
+
+	it("Jiraスタイルの型推論が正しく行われる", () => {
+		type ConditionGroup = InferPulumiSchema<
+			{ $ref: "ConditionGroupConfiguration" },
+			typeof jiraSchemaDict
+		>;
+		type WorkflowRule = InferPulumiSchema<
+			{ $ref: "WorkflowRuleConfiguration" },
+			typeof jiraSchemaDict
+		>;
+
+		type ExpectedRule = {
+			ruleKey: string;
+			id?: string;
+			parameters?: Record<string, string>;
+		};
+		type ExpectedGroup = {
+			operation?: "ANY" | "ALL";
+			conditions?: ExpectedRule[];
+			conditionGroups?: ConditionGroup[];
+		};
+
+		const _assertRule: Assert<Equal<WorkflowRule, ExpectedRule>> = true;
+		const _assertGroup: Assert<Equal<ConditionGroup, ExpectedGroup>> = true;
+		expect(_assertRule).toStrictEqual(true);
+		expect(_assertGroup).toStrictEqual(true);
+	});
+});
