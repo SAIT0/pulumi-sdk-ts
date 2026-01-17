@@ -1,6 +1,6 @@
 {
 	"name": "@sait0/pulumi-sdk-ts",
-	"version": "0.0.0",
+	"version": "0.0.1",
 	"description": "unoffical pulumi typescript sdk",
 	"type": "commonjs",
 	"exports": {
@@ -17,7 +17,6 @@
 		"@effect/vitest": "^0.27.0",
 		"@grpc/grpc-js": "^1.14.3",
 		"@pulumi/pulumi": "^3.213.0",
-		"effect": "^3.19.13",
 		"google-protobuf": "^3.21.4",
 		"vitest": "^3.2.4"
 	},
@@ -26,6 +25,9 @@
 		"@types/google-protobuf": "^3.15.12",
 		"@types/node": "^25.0.3",
 		"typescript": "^5.9.3"
+	},
+	"peerDependencies": {
+		"effect": "^3.19.13"
 	},
 	"publishConfig": {
     	"registry": "https://npm.pkg.github.com"
