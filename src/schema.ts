@@ -25,10 +25,14 @@ export type PulumiOneOfSchema = {
 	discriminator?: PulumiDiscriminatorSchema;
 };
 
-export type PulumiRefSchema<T extends PulumiObjectSchema> = {
-	$ref: T;
-	refName: string; // ProviderName:ModuleName:ObjectName
-};
+export type PulumiSchemaDict = Record<string, PulumiObjectSchema>;
+type EmptyDict = Record<string, never>;
+
+export type PulumiRefSchema<
+	T extends PulumiObjectSchema | undefined = undefined,
+> = T extends PulumiObjectSchema
+	? { $ref: string; type: T }
+	: { $ref: string; type?: undefined };
 
 export type PulumiObjectSchema = {
 	properties: Record<string, PulumiTypeSchema>;
@@ -128,7 +132,10 @@ type RequiredKeysOf<
 > = Extract<O["required"][number], keyof O["properties"]>;
 
 // PulumiSchema -> TS 型へ
-export type InferPulumiSchemaNoOneOf<S> = S extends PulumiStringSchema
+export type InferPulumiSchemaNoOneOf<
+	S,
+	Dict extends PulumiSchemaDict = EmptyDict,
+> = S extends PulumiStringSchema
 	? S["enum"] extends readonly (infer E)[]
 		? E
 		: string
@@ -137,46 +144,54 @@ export type InferPulumiSchemaNoOneOf<S> = S extends PulumiStringSchema
 		: S extends PulumiBooleanSchema
 			? boolean
 			: S extends PulumiArraySchema<infer I>
-				? InferPulumiSchemaNoOneOf<I>[]
-				: S extends PulumiRefSchema<infer O>
-					? O extends {
-							properties: Record<string, any>;
-							required: readonly string[];
-						}
-						? InferPulumiObjectSchema<O>
-						: never
-					: S extends PulumiInputsSchema
-						? InferPulumiInputsSchema<S>
-						: S extends PulumiObjectSchema
-							? InferPulumiObjectSchema<S>
-							: never;
+				? InferPulumiSchemaNoOneOf<I, Dict>[]
+				: // $ref + type (後方互換)
+					S extends { $ref: string; type: infer O extends PulumiObjectSchema }
+					? InferPulumiObjectSchema<O, Dict>
+					: // $ref のみ (Dict から解決)
+						S extends { $ref: infer RefName extends string; type?: undefined }
+						? RefName extends keyof Dict
+							? InferPulumiObjectSchema<Dict[RefName], Dict>
+							: never
+						: S extends PulumiInputsSchema
+							? InferPulumiInputsSchema<S, Dict>
+							: S extends PulumiObjectSchema
+								? InferPulumiObjectSchema<S, Dict>
+								: never;
 
-export type InferPulumiSchema<S> = S extends PulumiOneOfSchema
-	? InferPulumiSchemaNoOneOf<S["oneOf"][number]>
-	: InferPulumiSchemaNoOneOf<S>;
+export type InferPulumiSchema<
+	S,
+	Dict extends PulumiSchemaDict = EmptyDict,
+> = S extends PulumiOneOfSchema
+	? InferPulumiSchemaNoOneOf<S["oneOf"][number], Dict>
+	: InferPulumiSchemaNoOneOf<S, Dict>;
 
 // PulumiObjectSchema -> required/optional を反映した TS 型へ
 export type InferPulumiObjectSchema<
 	O extends { properties: Record<string, any>; required: readonly string[] },
+	Dict extends PulumiSchemaDict = EmptyDict,
 > = Simplify<
 	{
-		[K in RequiredKeysOf<O>]-?: InferPulumiSchema<O["properties"][K]>;
+		[K in RequiredKeysOf<O>]-?: InferPulumiSchema<O["properties"][K], Dict>;
 	} & {
 		[K in Exclude<
 			keyof O["properties"],
 			RequiredKeysOf<O>
-		>]?: InferPulumiSchema<O["properties"][K]>;
+		>]?: InferPulumiSchema<O["properties"][K], Dict>;
 	}
 >;
 
-export type InferPulumiInputsSchema<S extends PulumiInputsSchema> = Simplify<
+export type InferPulumiInputsSchema<
+	S extends PulumiInputsSchema,
+	Dict extends PulumiSchemaDict = EmptyDict,
+> = Simplify<
 	{
-		[K in RequiredKeysOf<S>]-?: InferPulumiSchema<S["properties"][K]>;
+		[K in RequiredKeysOf<S>]-?: InferPulumiSchema<S["properties"][K], Dict>;
 	} & {
 		[K in Exclude<
 			keyof S["properties"],
 			RequiredKeysOf<S>
-		>]?: InferPulumiSchema<S["properties"][K]>;
+		>]?: InferPulumiSchema<S["properties"][K], Dict>;
 	}
 >;
 
@@ -195,52 +210,87 @@ function pushPath(path: ReadonlyArray<string | number>, seg: string | number) {
 
 function schemaLabel(schema: PulumiTypeSchema): string {
 	if ("oneOf" in schema) return "oneOf";
-	if ("$ref" in schema) return `ref(${schema.$ref.name})`;
-	if ("type" in schema) return schema.type;
+	if ("$ref" in schema && typeof schema.$ref === "string") return `ref(${schema.$ref})`;
+	if ("type" in schema && typeof schema.type === "string") return schema.type;
 	return "unknown-schema";
 }
 
-export function parse<S extends PulumiInputsSchema>(
-	value: unknown,
-	schema: S,
-	path?: ReadonlyArray<string | number>,
-): Effect.Effect<InferPulumiInputsSchema<S>, ParseError>;
-export function parse<S extends PulumiObjectSchema>(
-	value: unknown,
-	schema: S,
-	path?: ReadonlyArray<string | number>,
-): Effect.Effect<InferPulumiObjectSchema<S>, ParseError>;
-export function parse<S extends PulumiTypeSchema>(
-	value: unknown,
-	schema: S,
-	path?: ReadonlyArray<string | number>,
-): Effect.Effect<InferPulumiSchema<S>, ParseError>;
 export function parse<
-	S extends PulumiTypeSchema | PulumiInputsSchema | PulumiObjectSchema,
+	S extends PulumiInputsSchema,
+	Dict extends PulumiSchemaDict = EmptyDict,
 >(
 	value: unknown,
 	schema: S,
+	dict?: Dict,
+	path?: ReadonlyArray<string | number>,
+): Effect.Effect<InferPulumiInputsSchema<S, Dict>, ParseError>;
+export function parse<
+	S extends PulumiObjectSchema,
+	Dict extends PulumiSchemaDict = EmptyDict,
+>(
+	value: unknown,
+	schema: S,
+	dict?: Dict,
+	path?: ReadonlyArray<string | number>,
+): Effect.Effect<InferPulumiObjectSchema<S, Dict>, ParseError>;
+export function parse<
+	S extends PulumiTypeSchema,
+	Dict extends PulumiSchemaDict = EmptyDict,
+>(
+	value: unknown,
+	schema: S,
+	dict?: Dict,
+	path?: ReadonlyArray<string | number>,
+): Effect.Effect<InferPulumiSchema<S, Dict>, ParseError>;
+export function parse<
+	S extends PulumiTypeSchema | PulumiInputsSchema | PulumiObjectSchema,
+	Dict extends PulumiSchemaDict = EmptyDict,
+>(
+	value: unknown,
+	schema: S,
+	dict: Dict = {} as Dict,
 	path: ReadonlyArray<string | number> = [],
-): Effect.Effect<InferPulumiSchema<S>, ParseError> {
+): Effect.Effect<InferPulumiSchema<S, Dict>, ParseError> {
 	if ("oneOf" in schema) {
-		return parseOneOf(value, schema, path) as Effect.Effect<
-			InferPulumiSchema<S>,
+		return parseOneOf(value, schema, dict, path) as Effect.Effect<
+			InferPulumiSchema<S, Dict>,
 			ParseError
 		>;
 	}
 	if ("properties" in schema && "required" in schema) {
-		return parsePulumiObjectSchema(value, schema, path) as Effect.Effect<
-			InferPulumiSchema<S>,
+		return parsePulumiObjectSchema(value, schema, dict, path) as Effect.Effect<
+			InferPulumiSchema<S, Dict>,
 			ParseError
 		>;
 	}
 
 	// $ref (object)
 	if ("$ref" in schema) {
-		return parsePulumiObjectSchema(value, schema.$ref, path) as Effect.Effect<
-			InferPulumiSchema<S>,
-			ParseError
-		>;
+		if (schema.type) {
+			// typeがある場合は従来通り
+			return parsePulumiObjectSchema(
+				value,
+				schema.type,
+				dict,
+				path,
+			) as Effect.Effect<InferPulumiSchema<S, Dict>, ParseError>;
+		}
+		// typeがない場合はdictから解決
+		const resolvedSchema = dict[schema.$ref];
+		if (!resolvedSchema) {
+			return Effect.fail(
+				new ParseError({
+					message: `Unknown $ref "${schema.$ref}"`,
+					path,
+				}),
+			);
+		}
+		return parsePulumiObjectSchema(
+			value,
+			resolvedSchema,
+			dict,
+			path,
+		) as Effect.Effect<InferPulumiSchema<S, Dict>, ParseError>;
 	}
 
 	// primitives / array
@@ -262,7 +312,7 @@ export function parse<
 					}),
 				);
 			}
-			return Effect.succeed(value as InferPulumiSchema<S>);
+			return Effect.succeed(value as InferPulumiSchema<S, Dict>);
 		}
 		case "number": {
 			if (typeof value !== "number" || Number.isNaN(value)) {
@@ -273,7 +323,7 @@ export function parse<
 					}),
 				);
 			}
-			return Effect.succeed(value as InferPulumiSchema<S>);
+			return Effect.succeed(value as InferPulumiSchema<S, Dict>);
 		}
 		case "boolean": {
 			if (typeof value !== "boolean") {
@@ -284,7 +334,7 @@ export function parse<
 					}),
 				);
 			}
-			return Effect.succeed(value as InferPulumiSchema<S>);
+			return Effect.succeed(value as InferPulumiSchema<S, Dict>);
 		}
 		case "array": {
 			if (!Array.isArray(value)) {
@@ -298,9 +348,11 @@ export function parse<
 			return Effect.gen(function* () {
 				const out: unknown[] = [];
 				for (let i = 0; i < value.length; i++) {
-					out.push(yield* parse(value[i], schema.items, pushPath(path, i)));
+					out.push(
+						yield* parse(value[i], schema.items, dict, pushPath(path, i)),
+					);
 				}
-				return out as InferPulumiSchema<S>;
+				return out as InferPulumiSchema<S, Dict>;
 			});
 		}
 		default: {
@@ -314,11 +366,15 @@ export function parse<
 	}
 }
 
-function parseOneOf<S extends PulumiOneOfSchema>(
+function parseOneOf<
+	S extends PulumiOneOfSchema,
+	Dict extends PulumiSchemaDict,
+>(
 	value: unknown,
 	schema: S,
+	dict: Dict,
 	path: ReadonlyArray<string | number>,
-): Effect.Effect<InferPulumiSchema<S>, ParseError> {
+): Effect.Effect<InferPulumiSchema<S, Dict>, ParseError> {
 	return Effect.gen(function* () {
 		const { oneOf, discriminator } = schema;
 		if (discriminator) {
@@ -359,7 +415,7 @@ function parseOneOf<S extends PulumiOneOfSchema>(
 					);
 				}
 				const target = oneOf.find(
-					(candidate) => "$ref" in candidate && candidate.refName === mapped,
+					(candidate) => "$ref" in candidate && candidate.$ref === mapped,
 				);
 				if (!target) {
 					return yield* Effect.fail(
@@ -369,20 +425,25 @@ function parseOneOf<S extends PulumiOneOfSchema>(
 						}),
 					);
 				}
-				return (yield* parse(value, target, path)) as InferPulumiSchema<S>;
+				return (yield* parse(
+					value,
+					target,
+					dict,
+					path,
+				)) as InferPulumiSchema<S, Dict>;
 			}
 		}
 
 		const successes: unknown[] = [];
 		for (let i = 0; i < oneOf.length; i++) {
-			const result = yield* Effect.either(parse(value, oneOf[i], path));
+			const result = yield* Effect.either(parse(value, oneOf[i], dict, path));
 			if (result._tag === "Right") {
 				successes.push(result.right);
 			}
 		}
 
 		if (successes.length === 1) {
-			return successes[0] as InferPulumiSchema<S>;
+			return successes[0] as InferPulumiSchema<S, Dict>;
 		}
 		if (successes.length === 0) {
 			return yield* Effect.fail(
@@ -403,11 +464,15 @@ function parseOneOf<S extends PulumiOneOfSchema>(
 	});
 }
 
-function parsePulumiObjectSchema<S extends PulumiObjectSchema>(
+function parsePulumiObjectSchema<
+	S extends PulumiObjectSchema,
+	Dict extends PulumiSchemaDict,
+>(
 	value: unknown,
 	schema: S,
+	dict: Dict,
 	path: ReadonlyArray<string | number>,
-): Effect.Effect<InferPulumiObjectSchema<S>, ParseError> {
+): Effect.Effect<InferPulumiObjectSchema<S, Dict>, ParseError> {
 	return Effect.gen(function* () {
 		if (!isRecord(value)) {
 			return yield* Effect.fail(
@@ -438,7 +503,7 @@ function parsePulumiObjectSchema<S extends PulumiObjectSchema>(
 				// required は上でチェック済みなので、optional は無視
 				continue;
 			}
-			out[key] = yield* parse(value[key], propSchema, pushPath(path, key));
+			out[key] = yield* parse(value[key], propSchema, dict, pushPath(path, key));
 		}
 
 		// unknown keysをはじく
@@ -453,7 +518,7 @@ function parsePulumiObjectSchema<S extends PulumiObjectSchema>(
 			);
 		}
 
-		return out as InferPulumiObjectSchema<S>;
+		return out as InferPulumiObjectSchema<S, Dict>;
 	});
 }
 
@@ -503,10 +568,10 @@ function normalizeTypeSchema(
 	schema: PulumiTypeSchema,
 ): [PulumiNormalizedTypeSchema, Record<string, PulumiNormalizedObjectSchema>] {
 	if ("$ref" in schema) {
-		const [internalSchema, typeMap] = normalizeObjectSchema(schema.$ref);
+		const [internalSchema, typeMap] = normalizeObjectSchema(schema.type);
 		return [
-			{ $ref: `#/types/${schema.refName}` },
-			{ ...typeMap, [schema.refName]: internalSchema },
+			{ $ref: `#/types/${schema.$ref}` },
+			{ ...typeMap, [schema.$ref]: internalSchema },
 		];
 	}
 	if ("oneOf" in schema) {
@@ -597,8 +662,8 @@ function normalizeObjectSchema(
 	];
 }
 
-export function normalizeProviderSchema(
-	provider: Provider<any>,
+export function normalizeProviderSchema<T>(
+	provider: Provider<T>,
 ): PulumiProviderSchema {
 	const [resources, types] = provider.resources.reduce<
 		[

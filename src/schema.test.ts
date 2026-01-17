@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import type {
 	InferPulumiSchema,
 	PulumiObjectSchema,
+	PulumiSchemaDict,
 	PulumiTypeSchema,
 } from "./schema.ts";
 import { parse } from "./schema.ts";
@@ -135,7 +136,7 @@ describe("objectのテスト", () => {
 					requiredText: "value",
 					optionalCount: 42,
 				},
-				{ $ref: schema, refName: "" },
+				{ $ref: "", type: schema },
 			);
 			expect(result).toStrictEqual({
 				requiredText: "value",
@@ -150,7 +151,7 @@ describe("objectのテスト", () => {
 				{
 					requiredText: "value",
 				},
-				{ $ref: schema, refName: "" },
+				{ $ref: "", type: schema },
 			);
 			expect(result).toStrictEqual({
 				requiredText: "value",
@@ -164,7 +165,7 @@ describe("objectのテスト", () => {
 				{
 					optionalCount: 42,
 				},
-				{ $ref: schema, refName: "" },
+				{ $ref: "", type: schema },
 			);
 			expect(error.message).toContain(
 				'Missing required property "requiredText"',
@@ -179,7 +180,7 @@ describe("objectのテスト", () => {
 				{
 					requiredText: 1,
 				},
-				{ $ref: schema, refName: "" },
+				{ $ref: "", type: schema },
 			);
 			expect(error.message).toContain("Expected string");
 			expect(error.path).toStrictEqual(["requiredText"]);
@@ -193,7 +194,7 @@ describe("objectのテスト", () => {
 					requiredText: "value",
 					unknown: "unexpected",
 				},
-				{ $ref: schema, refName: "" },
+				{ $ref: "", type: schema },
 			);
 			expect(error.message).toContain('Unknown property "unknown"');
 			expect(error.path).toStrictEqual(["unknown"]);
@@ -201,7 +202,7 @@ describe("objectのテスト", () => {
 	);
 
 	it.effect("object以外はエラーになる", () =>
-		expectParseError("value", { $ref: schema, refName: "" }),
+		expectParseError("value", { $ref: "", type: schema }),
 	);
 });
 
@@ -277,8 +278,8 @@ describe("oneOfのテスト", () => {
 			};
 			const schema: PulumiTypeSchema = {
 				oneOf: [
-					{ $ref: catSchema, refName: "Cat" },
-					{ $ref: dogSchema, refName: "Dog" },
+					{ $ref: "Cat", type: catSchema },
+					{ $ref: "Dog", type: dogSchema },
 				],
 				discriminator: {
 					propertyName: "type",
@@ -321,24 +322,24 @@ describe("enumの型推論", () => {
 		const schema = {
 			oneOf: [
 				{
-					$ref: {
+					$ref: "Cat",
+					type: {
 						properties: {
 							type: { type: "string", enum: ["cat"] },
 							meow: { type: "string" },
 						},
 						required: ["type", "meow"] as const,
 					},
-					refName: "Cat",
 				},
 				{
-					$ref: {
+					$ref: "Dog",
+					type: {
 						properties: {
 							type: { type: "string", enum: ["dog"] },
 							bark: { type: "string" },
 						},
 						required: ["type", "bark"] as const,
 					},
-					refName: "Dog",
 				},
 			],
 			discriminator: {
@@ -353,4 +354,172 @@ describe("enumの型推論", () => {
 		const _assert: Assert<Equal<Actual, Expected>> = true;
 		expect(_assert).toStrictEqual(true);
 	});
+});
+
+describe("再帰的なスキーマのテスト", () => {
+	const treeNodeSchemaDict = {
+		TreeNode: {
+			properties: {
+				value: { type: "string" },
+				children: {
+					type: "array",
+					items: { $ref: "TreeNode" },
+				},
+			},
+			required: ["value", "children"],
+		},
+	} as const satisfies PulumiSchemaDict;
+
+	it("再帰的な型が正しく推論される", () => {
+		type TreeNode = InferPulumiSchema<
+			{ $ref: "TreeNode" },
+			typeof treeNodeSchemaDict
+		>;
+		type Expected = { value: string; children: TreeNode[] };
+		const _assert: Assert<Equal<TreeNode, Expected>> = true;
+		expect(_assert).toStrictEqual(true);
+	});
+
+	it.effect("再帰的なスキーマをパース出来る", () =>
+		Effect.gen(function* () {
+			const result = yield* parse(
+				{
+					value: "root",
+					children: [
+						{ value: "child1", children: [] },
+						{
+							value: "child2",
+							children: [{ value: "grandchild", children: [] }],
+						},
+					],
+				},
+				{ $ref: "TreeNode" },
+				treeNodeSchemaDict,
+			);
+			expect(result).toStrictEqual({
+				value: "root",
+				children: [
+					{ value: "child1", children: [] },
+					{
+						value: "child2",
+						children: [{ value: "grandchild", children: [] }],
+					},
+				],
+			});
+		}),
+	);
+
+	it.effect("再帰的なスキーマで型エラーになる", () =>
+		Effect.gen(function* () {
+			const error = yield* Effect.flip(
+				parse(
+					{
+						value: "root",
+						children: [{ value: 123, children: [] }],
+					},
+					{ $ref: "TreeNode" },
+					treeNodeSchemaDict,
+				),
+			);
+			expect(error._tag).toStrictEqual("ParseError");
+			expect(error.message).toContain("Expected string");
+		}),
+	);
+
+	it.effect("存在しない$refはエラーになる", () =>
+		Effect.gen(function* () {
+			const error = yield* Effect.flip(
+				parse({ value: "test" }, { $ref: "Unknown" }, treeNodeSchemaDict),
+			);
+			expect(error._tag).toStrictEqual("ParseError");
+			expect(error.message).toContain('Unknown $ref "Unknown"');
+		}),
+	);
+});
+
+describe("相互参照のテスト", () => {
+	const schemaDict = {
+		Person: {
+			properties: {
+				name: { type: "string" },
+				pet: { $ref: "Pet" },
+			},
+			required: ["name"],
+		},
+		Pet: {
+			properties: {
+				name: { type: "string" },
+				owner: { $ref: "Person" },
+			},
+			required: ["name"],
+		},
+	} as const satisfies PulumiSchemaDict;
+
+	it("相互参照の型が正しく推論される", () => {
+		type Person = InferPulumiSchema<{ $ref: "Person" }, typeof schemaDict>;
+		type Pet = InferPulumiSchema<{ $ref: "Pet" }, typeof schemaDict>;
+		type ExpectedPerson = { name: string; pet?: Pet };
+		type ExpectedPet = { name: string; owner?: Person };
+		const _assertPerson: Assert<Equal<Person, ExpectedPerson>> = true;
+		const _assertPet: Assert<Equal<Pet, ExpectedPet>> = true;
+		expect(_assertPerson).toStrictEqual(true);
+		expect(_assertPet).toStrictEqual(true);
+	});
+
+	it.effect("相互参照のスキーマをパース出来る", () =>
+		Effect.gen(function* () {
+			const result = yield* parse(
+				{
+					name: "Alice",
+					pet: {
+						name: "Fluffy",
+						owner: { name: "Bob" },
+					},
+				},
+				{ $ref: "Person" },
+				schemaDict,
+			);
+			expect(result).toStrictEqual({
+				name: "Alice",
+				pet: {
+					name: "Fluffy",
+					owner: { name: "Bob" },
+				},
+			});
+		}),
+	);
+});
+
+describe("後方互換性のテスト", () => {
+	it("typeを指定した場合は従来通り動作する", () => {
+		const catSchema = {
+			properties: {
+				name: { type: "string" },
+				meow: { type: "string" },
+			},
+			required: ["name", "meow"],
+		} as const satisfies PulumiObjectSchema;
+
+		type Cat = InferPulumiSchema<{ $ref: "Cat"; type: typeof catSchema }>;
+		type Expected = { name: string; meow: string };
+		const _assert: Assert<Equal<Cat, Expected>> = true;
+		expect(_assert).toStrictEqual(true);
+	});
+
+	it.effect("typeを指定した場合のパースは従来通り動作する", () =>
+		Effect.gen(function* () {
+			const catSchema: PulumiObjectSchema = {
+				properties: {
+					name: { type: "string" },
+					meow: { type: "string" },
+				},
+				required: ["name", "meow"],
+			};
+			const result = yield* parse(
+				{ name: "Kitty", meow: "meow!" },
+				{ $ref: "Cat", type: catSchema },
+			);
+			expect(result).toStrictEqual({ name: "Kitty", meow: "meow!" });
+		}),
+	);
 });
