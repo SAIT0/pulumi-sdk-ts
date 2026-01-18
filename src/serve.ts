@@ -384,11 +384,19 @@ function handleRead<
 				),
 			),
 		),
-		Effect.flatMap(({ result, id, props }) => {
+		Effect.flatMap(({ result, id }) => {
 			const response = new providerProto.ReadResponse();
 			response.setId(id);
 			response.setProperties(objectToStruct(result.props));
-			response.setInputs(objectToStruct(props ?? {}));
+			// Extract inputs from result.props based on inputsSchema
+			const inputs: Record<string, unknown> = {};
+			const resultProps = result.props as Record<string, unknown>;
+			for (const key of Object.keys(resource.inputsSchema.properties)) {
+				if (key in resultProps) {
+					inputs[key] = resultProps[key];
+				}
+			}
+			response.setInputs(objectToStruct(inputs));
 			callback(null, response);
 
 			return Effect.void;

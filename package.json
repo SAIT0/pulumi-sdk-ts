@@ -1,6 +1,6 @@
 {
 	"name": "@sait0/pulumi-sdk-ts",
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"description": "unoffical pulumi typescript sdk",
 	"type": "commonjs",
 	"exports": {
