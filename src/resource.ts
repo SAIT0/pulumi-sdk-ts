@@ -60,7 +60,7 @@ export type Resource<
 	schemaDict?: TDict;
 
 	check: (
-		olds: InferPulumiInputsSchema<TInputsSchema, TDict> | undefined,
+		olds: InferPulumiObjectSchema<TPropertiesSchema, TDict> | undefined,
 		news: InferPulumiInputsSchema<TInputsSchema, TDict>,
 	) => Effect.Effect<
 		CheckResult<InferPulumiInputsSchema<TInputsSchema, TDict>>,

@@ -129,7 +129,7 @@ function handleCheck<
 			tryWith(() => structToObject(call.request.getOlds())).pipe(
 				Effect.flatMap((rawProps) =>
 					rawProps
-						? parse(rawProps, resource.inputsSchema, dict)
+						? parse(rawProps, resource.propertiesSchema, dict)
 						: Effect.succeed(undefined),
 				),
 				Effect.catchTag("ParseError", (e) =>
