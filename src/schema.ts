@@ -15,6 +15,10 @@ export type PulumiBooleanSchema = {
 	type: "boolean";
 };
 
+export type PulumiAnySchema = {
+	type: "any";
+};
+
 export type PulumiDiscriminatorSchema = {
 	propertyName: string;
 	mapping?: Record<string, string>;
@@ -53,6 +57,7 @@ export type PulumiTypeSchemaNoOneOf =
 	| PulumiStringSchema
 	| PulumiNumberSchema
 	| PulumiBooleanSchema
+	| PulumiAnySchema
 	| PulumiArraySchema<any>
 	| PulumiRefSchema<any>
 	| PulumiInlineObjectSchema;
@@ -90,6 +95,7 @@ export type PulumiNormalizedTypeSchemaNoOneOf =
 	| PulumiStringSchema
 	| PulumiNumberSchema
 	| PulumiBooleanSchema
+	| PulumiAnySchema
 	| PulumiNormalizedArraySchema
 	| PulumiNormalizedRefSchema
 	| PulumiNormalizedObjectSchema;
@@ -142,25 +148,27 @@ export type InferPulumiSchemaNoOneOf<
 	? S["enum"] extends readonly (infer E)[]
 		? E
 		: string
-	: S extends PulumiNumberSchema
-		? number
-		: S extends PulumiBooleanSchema
-			? boolean
-			: S extends PulumiArraySchema<infer I>
-				? InferPulumiSchemaNoOneOf<I, Dict>[]
-				: // $ref + type (後方互換)
-					S extends { $ref: string; type: infer O extends PulumiObjectSchema }
-					? InferPulumiObjectSchema<O, Dict>
-					: // $ref のみ (Dict から解決)
-						S extends { $ref: infer RefName extends string; type?: undefined }
-						? RefName extends keyof Dict
-							? InferPulumiObjectSchema<Dict[RefName], Dict>
-							: never
-						: S extends PulumiInputsSchema
-							? InferPulumiInputsSchema<S, Dict>
-							: S extends PulumiObjectSchema
-								? InferPulumiObjectSchema<S, Dict>
-								: never;
+	: S extends PulumiAnySchema
+		? any
+		: S extends PulumiNumberSchema
+			? number
+			: S extends PulumiBooleanSchema
+				? boolean
+				: S extends PulumiArraySchema<infer I>
+					? InferPulumiSchemaNoOneOf<I, Dict>[]
+					: // $ref + type (後方互換)
+						S extends { $ref: string; type: infer O extends PulumiObjectSchema }
+						? InferPulumiObjectSchema<O, Dict>
+						: // $ref のみ (Dict から解決)
+							S extends { $ref: infer RefName extends string; type?: undefined }
+							? RefName extends keyof Dict
+								? InferPulumiObjectSchema<Dict[RefName], Dict>
+								: never
+							: S extends PulumiInputsSchema
+								? InferPulumiInputsSchema<S, Dict>
+								: S extends PulumiObjectSchema
+									? InferPulumiObjectSchema<S, Dict>
+									: never;
 
 export type InferPulumiSchema<
 	S,
@@ -170,12 +178,13 @@ export type InferPulumiSchema<
 	: InferPulumiSchemaNoOneOf<S, Dict>;
 
 // additionalProperties の型を抽出するヘルパー
-type AdditionalPropertiesType<O, Dict extends PulumiSchemaDict> =
-	O extends { additionalProperties: infer AP }
-		? AP extends PulumiTypeSchema
-			? Record<string, InferPulumiSchema<AP, Dict>>
-			: {}
-		: {};
+type AdditionalPropertiesType<O, Dict extends PulumiSchemaDict> = O extends {
+	additionalProperties: infer AP;
+}
+	? AP extends PulumiTypeSchema
+		? Record<string, InferPulumiSchema<AP, Dict>>
+		: object
+	: object;
 
 // PulumiObjectSchema -> required/optional を反映した TS 型へ
 export type InferPulumiObjectSchema<
@@ -221,7 +230,8 @@ function pushPath(path: ReadonlyArray<string | number>, seg: string | number) {
 
 function schemaLabel(schema: PulumiTypeSchema): string {
 	if ("oneOf" in schema) return "oneOf";
-	if ("$ref" in schema && typeof schema.$ref === "string") return `ref(${schema.$ref})`;
+	if ("$ref" in schema && typeof schema.$ref === "string")
+		return `ref(${schema.$ref})`;
 	if ("type" in schema && typeof schema.type === "string") return schema.type;
 	return "unknown-schema";
 }
@@ -325,6 +335,9 @@ export function parse<
 			}
 			return Effect.succeed(value as InferPulumiSchema<S, Dict>);
 		}
+		case "any": {
+			return Effect.succeed(value as InferPulumiSchema<S, Dict>);
+		}
 		case "number": {
 			if (typeof value !== "number" || Number.isNaN(value)) {
 				return Effect.fail(
@@ -377,10 +390,7 @@ export function parse<
 	}
 }
 
-function parseOneOf<
-	S extends PulumiOneOfSchema,
-	Dict extends PulumiSchemaDict,
->(
+function parseOneOf<S extends PulumiOneOfSchema, Dict extends PulumiSchemaDict>(
 	value: unknown,
 	schema: S,
 	dict: Dict,
@@ -436,12 +446,10 @@ function parseOneOf<
 						}),
 					);
 				}
-				return (yield* parse(
-					value,
-					target,
-					dict,
-					path,
-				)) as InferPulumiSchema<S, Dict>;
+				return (yield* parse(value, target, dict, path)) as InferPulumiSchema<
+					S,
+					Dict
+				>;
 			}
 		}
 
@@ -514,7 +522,12 @@ function parsePulumiObjectSchema<
 				// required は上でチェック済みなので、optional は無視
 				continue;
 			}
-			out[key] = yield* parse(value[key], propSchema, dict, pushPath(path, key));
+			out[key] = yield* parse(
+				value[key],
+				propSchema,
+				dict,
+				pushPath(path, key),
+			);
 		}
 
 		// unknown keys の処理
@@ -626,6 +639,7 @@ function normalizeTypeSchema(
 		case "string":
 		case "number":
 		case "boolean":
+		case "any":
 			return [schema, {}];
 		case "array": {
 			const [items, typeMap] = normalizeTypeSchema(schema.items);

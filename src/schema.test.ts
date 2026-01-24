@@ -120,6 +120,25 @@ describe("booleanのテスト", () => {
 	);
 });
 
+describe("anyのテスト", () => {
+	it.effect("どの値でもパース出来る", () =>
+		Effect.gen(function* () {
+			const schema: PulumiTypeSchema = { type: "any" };
+			expect(yield* parse("text", schema)).toStrictEqual("text");
+			expect(yield* parse(123, schema)).toStrictEqual(123);
+			expect(yield* parse({ a: 1 }, schema)).toStrictEqual({ a: 1 });
+		}),
+	);
+
+	it("型推論はanyになる", () => {
+		const schema = { type: "any" } as const satisfies PulumiTypeSchema;
+		type Actual = InferPulumiSchema<typeof schema>;
+		type Expected = any;
+		const _assert: Assert<Equal<Actual, Expected>> = true;
+		expect(_assert).toStrictEqual(true);
+	});
+});
+
 describe("objectのテスト", () => {
 	const schema: PulumiObjectSchema = {
 		properties: {
@@ -631,6 +650,27 @@ describe("additionalPropertiesのテスト", () => {
 		expect(_assert).toStrictEqual(true);
 	});
 
+	it.effect("additionalPropertiesがanyの場合は未知キーも通す", () =>
+		Effect.gen(function* () {
+			const schema: PulumiObjectSchema = {
+				properties: {
+					id: { type: "string" },
+				},
+				required: ["id"],
+				additionalProperties: { type: "any" },
+			};
+			const result = yield* parse(
+				{ id: "abc", extra: { nested: 1 }, another: 42 },
+				{ $ref: "", type: schema },
+			);
+			expect(result).toStrictEqual({
+				id: "abc",
+				extra: { nested: 1 },
+				another: 42,
+			});
+		}),
+	);
+
 	it.effect("additionalPropertiesがundefinedの場合は従来通りエラー", () =>
 		Effect.gen(function* () {
 			const schema: PulumiObjectSchema = {
@@ -653,7 +693,10 @@ describe("additionalPropertiesと再帰的スキーマの組み合わせテス�
 		ConditionGroupConfiguration: {
 			properties: {
 				operation: { type: "string", enum: ["ANY", "ALL"] },
-				conditions: { type: "array", items: { $ref: "WorkflowRuleConfiguration" } },
+				conditions: {
+					type: "array",
+					items: { $ref: "WorkflowRuleConfiguration" },
+				},
 				conditionGroups: {
 					type: "array",
 					items: { $ref: "ConditionGroupConfiguration" },
