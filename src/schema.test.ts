@@ -139,6 +139,22 @@ describe("anyのテスト", () => {
 		const _assert: Assert<Equal<Actual, Expected>> = true;
 		expect(_assert).toStrictEqual(true);
 	});
+
+	it.effect("type付きでも組み込みAnyとして扱う", () =>
+		Effect.gen(function* () {
+			const schema = {
+				$ref: "pulumi.json#/Any",
+				type: {
+					// type が存在しても $ref 優先で素通しになることを確認
+					properties: { a: { type: "string" } },
+					required: [],
+				},
+			} as const satisfies PulumiTypeSchema;
+			const value = { whatever: 123, nested: { ok: true } };
+			const result = yield* parse(value, schema);
+			expect(result).toStrictEqual(value);
+		}),
+	);
 });
 
 describe("objectのテスト", () => {

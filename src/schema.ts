@@ -336,8 +336,24 @@ export function parse<
 		>;
 	}
 
-	// $ref (object)
+	// $ref (object or builtin)
 	if ("$ref" in schema) {
+		// 先に組み込み $ref を処理（type の有無に関わらず通す）
+		if (schema.$ref === PULUMI_ANY_REF) {
+			return Effect.succeed(value as InferPulumiSchema<S, Dict>);
+		}
+		if (schema.$ref === PULUMI_JSON_REF) {
+			if (!isJsonValue(value)) {
+				return Effect.fail(
+					new ParseError({
+						message: `Expected JSON-serializable value, got ${typeof value} for schema ref(${schema.$ref})`,
+						path,
+					}),
+				);
+			}
+			return Effect.succeed(value as InferPulumiSchema<S, Dict>);
+		}
+
 		if (schema.type) {
 			// typeがある場合は従来通り
 			return parsePulumiObjectSchema(
@@ -347,40 +363,22 @@ export function parse<
 				path,
 			) as Effect.Effect<InferPulumiSchema<S, Dict>, ParseError>;
 		}
-		// typeがない場合は組み込み or dict から解決
-		switch (schema.$ref) {
-			case PULUMI_ANY_REF: {
-				return Effect.succeed(value as InferPulumiSchema<S, Dict>);
-			}
-			case PULUMI_JSON_REF: {
-				if (!isJsonValue(value)) {
-					return Effect.fail(
-						new ParseError({
-							message: `Expected JSON-serializable value, got ${typeof value} for schema ref(${schema.$ref})`,
-							path,
-						}),
-					);
-				}
-				return Effect.succeed(value as InferPulumiSchema<S, Dict>);
-			}
-			default: {
-				const resolvedSchema = dict[schema.$ref];
-				if (!resolvedSchema) {
-					return Effect.fail(
-						new ParseError({
-							message: `Unknown $ref "${schema.$ref}"`,
-							path,
-						}),
-					);
-				}
-				return parsePulumiObjectSchema(
-					value,
-					resolvedSchema,
-					dict,
+		// typeがない場合はdictから解決
+		const resolvedSchema = dict[schema.$ref];
+		if (!resolvedSchema) {
+			return Effect.fail(
+				new ParseError({
+					message: `Unknown $ref "${schema.$ref}"`,
 					path,
-				) as Effect.Effect<InferPulumiSchema<S, Dict>, ParseError>;
-			}
+				}),
+			);
 		}
+		return parsePulumiObjectSchema(
+			value,
+			resolvedSchema,
+			dict,
+			path,
+		) as Effect.Effect<InferPulumiSchema<S, Dict>, ParseError>;
 	}
 
 	// primitives / array
