@@ -1,11 +1,16 @@
 {
 	"name": "@sait0/pulumi-sdk-ts",
-	"version": "0.0.7",
+	"version": "0.0.8",
 	"description": "unoffical pulumi typescript sdk",
 	"type": "commonjs",
 	"exports": {
 		".": "./src/index.ts"
 	},
+	"files": [
+		"src/**/*",
+		"README.md",
+		"LICENSE.md"
+	],
 	"scripts": {
 		"tsc": "tsc --noEmit",
 		"test": "vitest run",

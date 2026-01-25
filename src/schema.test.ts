@@ -123,7 +123,7 @@ describe("booleanのテスト", () => {
 describe("anyのテスト", () => {
 	it.effect("どの値でもパース出来る", () =>
 		Effect.gen(function* () {
-			const schema: PulumiTypeSchema = { type: "any" };
+			const schema: PulumiTypeSchema = { $ref: "pulumi.json#/Any" };
 			expect(yield* parse("text", schema)).toStrictEqual("text");
 			expect(yield* parse(123, schema)).toStrictEqual(123);
 			expect(yield* parse({ a: 1 }, schema)).toStrictEqual({ a: 1 });
@@ -131,7 +131,9 @@ describe("anyのテスト", () => {
 	);
 
 	it("型推論はanyになる", () => {
-		const schema = { type: "any" } as const satisfies PulumiTypeSchema;
+		const schema = {
+			$ref: "pulumi.json#/Any",
+		} as const satisfies PulumiTypeSchema;
 		type Actual = InferPulumiSchema<typeof schema>;
 		type Expected = any;
 		const _assert: Assert<Equal<Actual, Expected>> = true;
@@ -657,7 +659,7 @@ describe("additionalPropertiesのテスト", () => {
 					id: { type: "string" },
 				},
 				required: ["id"],
-				additionalProperties: { type: "any" },
+				additionalProperties: { $ref: "pulumi.json#/Any" },
 			};
 			const result = yield* parse(
 				{ id: "abc", extra: { nested: 1 }, another: 42 },

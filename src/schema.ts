@@ -15,8 +15,17 @@ export type PulumiBooleanSchema = {
 	type: "boolean";
 };
 
+const PULUMI_ANY_REF = "pulumi.json#/Any" as const;
+const PULUMI_JSON_REF = "pulumi.json#/Json" as const;
+
 export type PulumiAnySchema = {
-	type: "any";
+	$ref: typeof PULUMI_ANY_REF;
+	type?: undefined;
+};
+
+export type PulumiJsonSchema = {
+	$ref: typeof PULUMI_JSON_REF;
+	type?: undefined;
 };
 
 export type PulumiDiscriminatorSchema = {
@@ -58,6 +67,7 @@ export type PulumiTypeSchemaNoOneOf =
 	| PulumiNumberSchema
 	| PulumiBooleanSchema
 	| PulumiAnySchema
+	| PulumiJsonSchema
 	| PulumiArraySchema<any>
 	| PulumiRefSchema<any>
 	| PulumiInlineObjectSchema;
@@ -96,6 +106,7 @@ export type PulumiNormalizedTypeSchemaNoOneOf =
 	| PulumiNumberSchema
 	| PulumiBooleanSchema
 	| PulumiAnySchema
+	| PulumiJsonSchema
 	| PulumiNormalizedArraySchema
 	| PulumiNormalizedRefSchema
 	| PulumiNormalizedObjectSchema;
@@ -135,6 +146,14 @@ export type PulumiProviderSchema = {
 
 export type Simplify<T> = { [K in keyof T]: T[K] } & {};
 
+export type JsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| JsonValue[]
+	| { [key: string]: JsonValue };
+
 // required に含まれるキーのうち、properties に実在するものだけ抽出
 type RequiredKeysOf<
 	O extends { properties: Record<string, any>; required: readonly string[] },
@@ -150,25 +169,37 @@ export type InferPulumiSchemaNoOneOf<
 		: string
 	: S extends PulumiAnySchema
 		? any
-		: S extends PulumiNumberSchema
-			? number
-			: S extends PulumiBooleanSchema
-				? boolean
-				: S extends PulumiArraySchema<infer I>
-					? InferPulumiSchemaNoOneOf<I, Dict>[]
-					: // $ref + type (後方互換)
-						S extends { $ref: string; type: infer O extends PulumiObjectSchema }
-						? InferPulumiObjectSchema<O, Dict>
-						: // $ref のみ (Dict から解決)
-							S extends { $ref: infer RefName extends string; type?: undefined }
-							? RefName extends keyof Dict
-								? InferPulumiObjectSchema<Dict[RefName], Dict>
-								: never
-							: S extends PulumiInputsSchema
-								? InferPulumiInputsSchema<S, Dict>
-								: S extends PulumiObjectSchema
-									? InferPulumiObjectSchema<S, Dict>
-									: never;
+		: S extends PulumiJsonSchema
+			? JsonValue
+			: S extends PulumiNumberSchema
+				? number
+				: S extends PulumiBooleanSchema
+					? boolean
+					: S extends PulumiArraySchema<infer I>
+						? InferPulumiSchemaNoOneOf<I, Dict>[]
+						: // $ref + type (後方互換)
+							S extends {
+									$ref: string;
+									type: infer O extends PulumiObjectSchema;
+								}
+							? InferPulumiObjectSchema<O, Dict>
+							: // $ref のみ (Dict から解決 + 組み込み)
+								S extends {
+										$ref: infer RefName extends string;
+										type?: undefined;
+									}
+								? RefName extends typeof PULUMI_ANY_REF
+									? any
+									: RefName extends typeof PULUMI_JSON_REF
+										? JsonValue
+										: RefName extends keyof Dict
+											? InferPulumiObjectSchema<Dict[RefName], Dict>
+											: never
+								: S extends PulumiInputsSchema
+									? InferPulumiInputsSchema<S, Dict>
+									: S extends PulumiObjectSchema
+										? InferPulumiObjectSchema<S, Dict>
+										: never;
 
 export type InferPulumiSchema<
 	S,
@@ -226,6 +257,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function pushPath(path: ReadonlyArray<string | number>, seg: string | number) {
 	return [...path, seg] as const;
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+	if (
+		typeof value === "string" ||
+		typeof value === "boolean" ||
+		value === null
+	) {
+		return true;
+	}
+	if (typeof value === "number") {
+		return Number.isFinite(value);
+	}
+	if (Array.isArray(value)) {
+		return value.every(isJsonValue);
+	}
+	if (isRecord(value)) {
+		return Object.values(value).every(isJsonValue);
+	}
+	return false;
 }
 
 function schemaLabel(schema: PulumiTypeSchema): string {
@@ -296,22 +347,40 @@ export function parse<
 				path,
 			) as Effect.Effect<InferPulumiSchema<S, Dict>, ParseError>;
 		}
-		// typeがない場合はdictから解決
-		const resolvedSchema = dict[schema.$ref];
-		if (!resolvedSchema) {
-			return Effect.fail(
-				new ParseError({
-					message: `Unknown $ref "${schema.$ref}"`,
+		// typeがない場合は組み込み or dict から解決
+		switch (schema.$ref) {
+			case PULUMI_ANY_REF: {
+				return Effect.succeed(value as InferPulumiSchema<S, Dict>);
+			}
+			case PULUMI_JSON_REF: {
+				if (!isJsonValue(value)) {
+					return Effect.fail(
+						new ParseError({
+							message: `Expected JSON-serializable value, got ${typeof value} for schema ref(${schema.$ref})`,
+							path,
+						}),
+					);
+				}
+				return Effect.succeed(value as InferPulumiSchema<S, Dict>);
+			}
+			default: {
+				const resolvedSchema = dict[schema.$ref];
+				if (!resolvedSchema) {
+					return Effect.fail(
+						new ParseError({
+							message: `Unknown $ref "${schema.$ref}"`,
+							path,
+						}),
+					);
+				}
+				return parsePulumiObjectSchema(
+					value,
+					resolvedSchema,
+					dict,
 					path,
-				}),
-			);
+				) as Effect.Effect<InferPulumiSchema<S, Dict>, ParseError>;
+			}
 		}
-		return parsePulumiObjectSchema(
-			value,
-			resolvedSchema,
-			dict,
-			path,
-		) as Effect.Effect<InferPulumiSchema<S, Dict>, ParseError>;
 	}
 
 	// primitives / array
@@ -333,9 +402,6 @@ export function parse<
 					}),
 				);
 			}
-			return Effect.succeed(value as InferPulumiSchema<S, Dict>);
-		}
-		case "any": {
 			return Effect.succeed(value as InferPulumiSchema<S, Dict>);
 		}
 		case "number": {
@@ -587,6 +653,11 @@ function normalizeResourceSchema<
 	];
 }
 
+function normalizeRef(ref: string): string {
+	if (ref.includes("#")) return ref;
+	return `#/types/${ref}`;
+}
+
 function normalizeTypeSchema(
 	schema: PulumiTypeSchemaNoOneOf,
 ): [
@@ -604,13 +675,14 @@ function normalizeTypeSchema(
 ): [PulumiNormalizedTypeSchema, Record<string, PulumiNormalizedObjectSchema>] {
 	if ("$ref" in schema) {
 		// $ref のみ（type なし）の場合はそのまま参照を返す
+		const normalizedRef = normalizeRef(schema.$ref);
 		if (!schema.type) {
-			return [{ $ref: `#/types/${schema.$ref}` }, {}];
+			return [{ $ref: normalizedRef }, {}];
 		}
 		// $ref + type がある場合は従来通り正規化
 		const [internalSchema, typeMap] = normalizeObjectSchema(schema.type);
 		return [
-			{ $ref: `#/types/${schema.$ref}` },
+			{ $ref: normalizedRef },
 			{ ...typeMap, [schema.$ref]: internalSchema },
 		];
 	}
@@ -639,7 +711,6 @@ function normalizeTypeSchema(
 		case "string":
 		case "number":
 		case "boolean":
-		case "any":
 			return [schema, {}];
 		case "array": {
 			const [items, typeMap] = normalizeTypeSchema(schema.items);
