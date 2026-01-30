@@ -18,6 +18,35 @@ export type PulumiBooleanSchema = {
 const PULUMI_ANY_REF = "pulumi.json#/Any" as const;
 const PULUMI_JSON_REF = "pulumi.json#/Json" as const;
 
+// Pulumi Unknown Value の定数
+export const PULUMI_UNKNOWN_VALUE = "04da6b54-80e4-46f7-96ec-b56ff0331ba9";
+
+// Unknown値を含むかチェックする関数（再帰的に検査）
+export function containsUnknownValue(value: unknown): boolean {
+	if (value === PULUMI_UNKNOWN_VALUE) {
+		return true;
+	}
+	if (value === null || value === undefined) {
+		return false;
+	}
+	if (
+		typeof value === "string" ||
+		typeof value === "number" ||
+		typeof value === "boolean"
+	) {
+		return false;
+	}
+	if (Array.isArray(value)) {
+		return value.some(containsUnknownValue);
+	}
+	if (typeof value === "object") {
+		return Object.values(value as Record<string, unknown>).some(
+			containsUnknownValue,
+		);
+	}
+	return false;
+}
+
 export type PulumiAnySchema = {
 	$ref: typeof PULUMI_ANY_REF;
 	type?: undefined;

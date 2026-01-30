@@ -11,6 +11,7 @@ import { PulumiError } from "./error.ts";
 import type { Provider } from "./provider.ts";
 import type { DiffKind, Resource } from "./resource.ts";
 import {
+	containsUnknownValue,
 	normalizeProviderSchema,
 	type PulumiInputsSchema,
 	type PulumiObjectSchema,
@@ -224,11 +225,53 @@ function handleDiff<
 				),
 			),
 		),
-		Effect.bind("news", () =>
-			tryWith(() => structToObject(call.request.getNews())).pipe(
-				Effect.flatMap((rawProps) =>
-					parse(rawProps, resource.inputsSchema, dict),
-				),
+		Effect.bind("rawNews", () =>
+			tryWith(() => structToObject(call.request.getNews())),
+		),
+		Effect.flatMap(({ id, olds, rawNews }) => {
+			// newsにUnknown値が含まれている場合はDIFF_UNKNOWNを返す
+			if (containsUnknownValue(rawNews)) {
+				const response = new providerProto.DiffResponse();
+				response.setChanges(
+					providerProto.DiffResponse.DiffChanges.DIFF_UNKNOWN,
+				);
+				callback(null, response);
+				return Effect.void;
+			}
+
+			// 通常のパースとDiff処理
+			return parse(rawNews, resource.inputsSchema, dict).pipe(
+				Effect.flatMap((news) => {
+					const result = resource.diff(id, olds, news);
+					const response = new providerProto.DiffResponse();
+					response.setChanges(
+						result.diffs.length > 0
+							? providerProto.DiffResponse.DiffChanges.DIFF_SOME
+							: providerProto.DiffResponse.DiffChanges.DIFF_NONE,
+					);
+					result.diffs.forEach((d) => {
+						response.addDiffs(d.property);
+						switch (d.kind) {
+							case "ADD_REPLACE":
+							case "DELETE_REPLACE":
+							case "UPDATE_REPLACE":
+								response.addReplaces(d.property);
+						}
+						const diff = new providerProto.PropertyDiff();
+						diff.setKind(mapDiffKind(d.kind));
+						response.getDetaileddiffMap().set(d.property, diff);
+					});
+					response.setHasdetaileddiff(true);
+					response.setDeletebeforereplace(
+						result.diffs.some((d) =>
+							["ADD_REPLACE", "DELETE_REPLACE", "UPDATE_REPLACE"].includes(
+								d.kind,
+							),
+						),
+					);
+					callback(null, response);
+					return Effect.void;
+				}),
 				Effect.catchTag("ParseError", (e) =>
 					Effect.fail(
 						new PulumiError({
@@ -237,46 +280,7 @@ function handleDiff<
 						}),
 					),
 				),
-			),
-		),
-		Effect.bind("result", ({ id, olds, news }) =>
-			Effect.try({
-				try: () => resource.diff(id, olds, news),
-				catch: (e) =>
-					new PulumiError({
-						status: grpc.status.INTERNAL,
-						message: `[DIFF]: ${e instanceof Error ? e.message : "unknown error"}`,
-					}),
-			}),
-		),
-		Effect.flatMap(({ result }) => {
-			const response = new providerProto.DiffResponse();
-			response.setChanges(
-				result.diffs.length > 0
-					? providerProto.DiffResponse.DiffChanges.DIFF_SOME
-					: providerProto.DiffResponse.DiffChanges.DIFF_NONE,
 			);
-			result.diffs.forEach((d) => {
-				response.addDiffs(d.property);
-				switch (d.kind) {
-					case "ADD_REPLACE":
-					case "DELETE_REPLACE":
-					case "UPDATE_REPLACE":
-						response.addReplaces(d.property);
-				}
-				const diff = new providerProto.PropertyDiff();
-				diff.setKind(mapDiffKind(d.kind));
-				response.getDetaileddiffMap().set(d.property, diff);
-			});
-			response.setHasdetaileddiff(true);
-			response.setDeletebeforereplace(
-				result.diffs.some((d) =>
-					["ADD_REPLACE", "DELETE_REPLACE", "UPDATE_REPLACE"].includes(d.kind),
-				),
-			);
-			callback(null, response);
-
-			return Effect.void;
 		}),
 	);
 }

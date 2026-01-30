@@ -6,7 +6,11 @@ import type {
 	PulumiSchemaDict,
 	PulumiTypeSchema,
 } from "./schema.ts";
-import { parse } from "./schema.ts";
+import {
+	containsUnknownValue,
+	parse,
+	PULUMI_UNKNOWN_VALUE,
+} from "./schema.ts";
 
 type Equal<A, B> =
 	(<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
@@ -704,6 +708,75 @@ describe("additionalPropertiesのテスト", () => {
 			expect(error.message).toContain('Unknown property "unknown"');
 		}),
 	);
+});
+
+describe("containsUnknownValueのテスト", () => {
+	it("Unknown値のUUID文字列を検出できる", () => {
+		expect(containsUnknownValue(PULUMI_UNKNOWN_VALUE)).toBe(true);
+		expect(containsUnknownValue("04da6b54-80e4-46f7-96ec-b56ff0331ba9")).toBe(
+			true,
+		);
+	});
+
+	it("通常の文字列はfalseを返す", () => {
+		expect(containsUnknownValue("hello")).toBe(false);
+		expect(containsUnknownValue("some-uuid-like-string")).toBe(false);
+	});
+
+	it("null, undefined, プリミティブ値はfalseを返す", () => {
+		expect(containsUnknownValue(null)).toBe(false);
+		expect(containsUnknownValue(undefined)).toBe(false);
+		expect(containsUnknownValue(123)).toBe(false);
+		expect(containsUnknownValue(true)).toBe(false);
+		expect(containsUnknownValue(false)).toBe(false);
+	});
+
+	it("オブジェクト内のネストされたUnknown値を検出できる", () => {
+		expect(
+			containsUnknownValue({
+				name: "test",
+				value: PULUMI_UNKNOWN_VALUE,
+			}),
+		).toBe(true);
+
+		expect(
+			containsUnknownValue({
+				nested: {
+					deep: {
+						value: PULUMI_UNKNOWN_VALUE,
+					},
+				},
+			}),
+		).toBe(true);
+	});
+
+	it("配列内のUnknown値を検出できる", () => {
+		expect(containsUnknownValue([PULUMI_UNKNOWN_VALUE])).toBe(true);
+		expect(containsUnknownValue(["a", "b", PULUMI_UNKNOWN_VALUE])).toBe(true);
+		expect(containsUnknownValue([{ value: PULUMI_UNKNOWN_VALUE }])).toBe(true);
+	});
+
+	it("Unknown値を含まないオブジェクトはfalseを返す", () => {
+		expect(
+			containsUnknownValue({
+				name: "test",
+				count: 42,
+				active: true,
+				nested: { value: "normal" },
+			}),
+		).toBe(false);
+	});
+
+	it("Unknown値を含まない配列はfalseを返す", () => {
+		expect(containsUnknownValue(["a", "b", "c"])).toBe(false);
+		expect(containsUnknownValue([1, 2, 3])).toBe(false);
+		expect(containsUnknownValue([{ name: "test" }])).toBe(false);
+	});
+
+	it("空のオブジェクトと配列はfalseを返す", () => {
+		expect(containsUnknownValue({})).toBe(false);
+		expect(containsUnknownValue([])).toBe(false);
+	});
 });
 
 describe("additionalPropertiesと再帰的スキーマの組み合わせテスト", () => {
